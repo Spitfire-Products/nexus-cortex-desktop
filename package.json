@@ -1,0 +1,48 @@
+{
+  "name": "@nexus-cortex/desktop",
+  "version": "0.10.2",
+  "description": "Host-computer control for AI agents: screen, mouse, keyboard, native-app accessibility perception (macOS AX, Windows-guest UI Automation), app profiles and an event feed \u2014 as one MCP tool, `desktop`. Off unless NEXUS_BROWSER_DESKTOP=virtual|real.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./script": "./dist/desktop-script.js",
+    "./package.json": "./package.json",
+    "./bus-daemon": "./dist/desktop-bus-daemon.js"
+  },
+  "files": [
+    "dist",
+    "guest",
+    "LICENSE",
+    "LICENSE-COMMERCIAL.md",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && node build.mjs",
+    "clean": "rm -rf dist",
+    "test": "node test/desktop.mjs"
+  },
+  "license": "(AGPL-3.0-only OR LicenseRef-Spitfire-Commercial)",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "zod": "^3.25.0 || ^4.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Spitfire-Products/nexus-cortex-desktop.git"
+  },
+  "homepage": "https://github.com/Spitfire-Products/nexus-cortex-desktop#readme",
+  "bugs": {
+    "url": "https://github.com/Spitfire-Products/nexus-cortex-desktop/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

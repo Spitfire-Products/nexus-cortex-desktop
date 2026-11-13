@@ -1,0 +1,18 @@
+@nexus-cortex/desktop
+Copyright (c) 2025-2026 Spitfire Products.
+
+Licensed under the GNU Affero General Public License v3.0 only (see LICENSE), or under a commercial license from
+Spitfire Products (see LICENSE-COMMERCIAL.md). SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Spitfire-Commercial
+
+This package contains code from the nexus-browser and nexus-browser-sandbox services of Spitfire Products, distributed
+here under the same terms.
+
+Bundled third-party code (full notices: dist/THIRD_PARTY_NOTICES.md, generated at build time):
+- @medv/finder 4.0.2 — MIT License, Copyright (c) 2018 Anton Medvedev (vendored in the page scripts;
+  license text: third_party/medv-finder.LICENSE)
+- npm packages compiled into dist/ — each listed with its license in dist/THIRD_PARTY_NOTICES.md
+
+Installed separately on the user's machine (not distributed in this package) by nexus-browser-doctor or the install
+option, each under its own license: Chromium / Chrome for Testing; patchright (Apache-2.0); websockify (LGPL-3.0);
+PyMuPDF (AGPL-3.0); pdfplumber (MIT); beautifulsoup4 (MIT); uBlock Origin Lite (GPL-3.0); Consent-O-Matic (MIT);
+and the system packages Xvfb (MIT/X11), xdotool (BSD-3-Clause), x11vnc (GPL-2.0).

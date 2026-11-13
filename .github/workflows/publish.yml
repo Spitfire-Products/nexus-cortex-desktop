@@ -1,0 +1,24 @@
+name: Publish to npm
+# Fires when deploy-nexus-cortex-pkg.sh --release pushes a version tag, or manually from the Actions tab.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write   # npm trusted publishing (OIDC) + provenance
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish @nexus-cortex/desktop (trusted publishing, no token)
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name"); version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then echo "::notice::$name@$version already on npm — skipping"; exit 0; fi
+          npx -y npm@11 publish --access public --provenance
