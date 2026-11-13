@@ -18,7 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-var VERSION = "0.10.2";
+var VERSION = "0.10.3";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -2341,4 +2341,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-AFGXGXAI.js.map
+//# sourceMappingURL=chunk-6VJ63UC7.js.map
