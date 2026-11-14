@@ -39,8 +39,12 @@ await (async () => {
   assert.deepEqual([r.ok, r.compiled, r.output], [true, true, undefined]); n++; console.log('PASS osa validate only');
   const s = await runShortcuts(stub(() => ({ code: 1, stdout: '', stderr: 'ERROR: Unrecognized attribute string flag x\nError: The operation couldn’t be completed. Couldn’t find shortcut' })), 'run', 'nope');
   assert.equal(s.ok, false); assert.match(s.error, /Couldn’t find shortcut/); n++; console.log('PASS shortcut not found');
-  const noType = await runShortcuts(async (c, a) => { const o = a[a.indexOf('-o') + 1]; (await import('node:fs')).writeFileSync(o, ''); return { code: 0, stdout: 'M2 DESKTOP TEST\n', stderr: '' }; }, 'run', 'upper-signed', 'm2 desktop test');
-  assert.equal(noType.output, 'M2 DESKTOP TEST'); n++; console.log('PASS shortcut run without output_type returns stdout when the -o file is empty (m2 bug 2)');
+  // the REAL CLI (m2 measured 11-14): without --output-type it infers the type from the -o file's EXTENSION — '.txt' gets the text,
+  // anything else gets NO file — and with -o it prints NOTHING to stdout. The stub models exactly that.
+  const realCli = async (c, a) => { const o = a[a.indexOf('-o') + 1]; const typed = a.includes('--output-type');
+    if (typed || o.endsWith('.txt')) (await import('node:fs')).writeFileSync(o, 'M2 DESKTOP TEST\n'); return { code: 0, stdout: '', stderr: '' }; };
+  const noType = await runShortcuts(realCli, 'run', 'upper-signed', 'm2 desktop test');
+  assert.equal(noType.output, 'M2 DESKTOP TEST'); n++; console.log('PASS shortcut run without output_type returns the text (real CLI: type from the -o extension, silent stdout)');
   const l = await runShortcuts(stub(() => ({ code: 0, stdout: 'A\nB\n', stderr: '' })), 'list');
   assert.deepEqual(l.names, ['A', 'B']); n++; console.log('PASS shortcut list');
 })();

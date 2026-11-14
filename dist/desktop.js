@@ -19,7 +19,7 @@ import {
   registerDesktopTool,
   x11Backend,
   xdoKey
-} from "./chunk-64EWXYME.js";
+} from "./chunk-LAL2EA5A.js";
 import "./chunk-ZQPMRQT4.js";
 export {
   AX_INTERACTIVE,

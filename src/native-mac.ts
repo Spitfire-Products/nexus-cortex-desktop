@@ -93,7 +93,9 @@ export async function runShortcuts(exec: Exec, op: 'list' | 'run', name?: string
   if (!name) return { ok: false, error: 'run needs the shortcut name' };
   const args = ['run', name]; const files: string[] = [];
   if (typeof input === 'string') { const f = tmp('.txt'); fs.writeFileSync(f, input, 'utf8'); files.push(f); args.push('-i', f); }
-  const outF = tmp('.out'); files.push(outF); args.push('-o', outF);
+  // `.txt`, not `.out`: without --output-type the CLI infers the type from the -o EXTENSION and writes nothing for an unknown one,
+  // and prints nothing to stdout when -o is given (m2 measured 11-14, 0.11.2 retest) — plain text is the useful default for an agent
+  const outF = tmp('.txt'); files.push(outF); args.push('-o', outF);
   if (opts.outputType) args.push('--output-type', opts.outputType);
   try {
     const r = await exec('shortcuts', args, { timeoutMs: opts.timeoutMs ?? 120000 });

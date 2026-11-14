@@ -114,7 +114,7 @@ async function runShortcuts(exec, op, name, input, opts = {}) {
     files.push(f);
     args.push("-i", f);
   }
-  const outF = tmp(".out");
+  const outF = tmp(".txt");
   files.push(outF);
   args.push("-o", outF);
   if (opts.outputType) args.push("--output-type", opts.outputType);
@@ -2487,4 +2487,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-64EWXYME.js.map
+//# sourceMappingURL=chunk-LAL2EA5A.js.map
