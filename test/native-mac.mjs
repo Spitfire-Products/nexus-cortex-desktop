@@ -18,6 +18,11 @@ ok('JXA run error: no offsets', () => {
   const e = parseOsaError("execution error: Error: TypeError: null is not an object (evaluating 'null.foo') (-2700)");
   assert.equal(e.number, -2700); assert.equal(e.line, undefined);
 });
+ok('JXA run error from a temp file (m2 0.11.1 bug 1): number + hint parsed, path dropped, Error: not doubled', () => {
+  const e = parseOsaError("/var/folders/ab/xyz/T/nexus-desktop-123-1763100000000-k3j2h1.js: execution error: Error: Error: Can't get object. (-1728)");
+  assert.equal(e.number, -1728); assert.ok(e.hint); assert.doesNotMatch(e.message, /var\/folders|nexus-desktop-/); assert.doesNotMatch(e.message, /Error: Error:/);
+  assert.match(e.message, /Can't get object/);
+});
 ok('permission hints', () => { assert.match(osaHint(-1743), /Automation/); assert.match(osaHint(-1719), /Accessibility/); assert.match(osaHint(-600), /not running/); });
 ok('shortcuts noise stripped', () => {
   const noise = Array(5).fill('ERROR: Unrecognized attribute string flag \'?\' in attribute string "T@\\"NSString\\",?,R,C" for property debugDescription').join('\n');
@@ -34,6 +39,8 @@ await (async () => {
   assert.deepEqual([r.ok, r.compiled, r.output], [true, true, undefined]); n++; console.log('PASS osa validate only');
   const s = await runShortcuts(stub(() => ({ code: 1, stdout: '', stderr: 'ERROR: Unrecognized attribute string flag x\nError: The operation couldn’t be completed. Couldn’t find shortcut' })), 'run', 'nope');
   assert.equal(s.ok, false); assert.match(s.error, /Couldn’t find shortcut/); n++; console.log('PASS shortcut not found');
+  const noType = await runShortcuts(async (c, a) => { const o = a[a.indexOf('-o') + 1]; (await import('node:fs')).writeFileSync(o, ''); return { code: 0, stdout: 'M2 DESKTOP TEST\n', stderr: '' }; }, 'run', 'upper-signed', 'm2 desktop test');
+  assert.equal(noType.output, 'M2 DESKTOP TEST'); n++; console.log('PASS shortcut run without output_type returns stdout when the -o file is empty (m2 bug 2)');
   const l = await runShortcuts(stub(() => ({ code: 0, stdout: 'A\nB\n', stderr: '' })), 'list');
   assert.deepEqual(l.names, ['A', 'B']); n++; console.log('PASS shortcut list');
 })();

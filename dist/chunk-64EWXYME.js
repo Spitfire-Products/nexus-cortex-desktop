@@ -25,6 +25,10 @@ import os from "node:os";
 import path from "node:path";
 var ERR_LINE = /^(?:([^:\n]*[^\d:\n][^:\n]*):)?(?:(\d+):(\d+):|(\d+):) (?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
 var ERR_BARE = /^(?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+var ERR_FILE_BARE = /^[^:\n]*[^\d:\n][^:\n]*: (?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+function cleanMsg(m) {
+  return m.replace(/^(?:Error: )+/, "Error: ").replace(/\S*nexus-desktop-\d+-\d+-[a-z0-9]+\.\w+/g, "<script>").trim();
+}
 function osaHint(num) {
   switch (num) {
     case -1743:
@@ -53,7 +57,7 @@ function parseOsaError(stderr) {
     let m = ERR_LINE.exec(l);
     if (m) {
       const num = m[6] !== void 0 ? Number(m[6]) : void 0;
-      const e = { message: m[5], ...num !== void 0 ? { number: num } : {} };
+      const e = { message: cleanMsg(m[5]), ...num !== void 0 ? { number: num } : {} };
       if (m[2] !== void 0) {
         e.start = Number(m[2]);
         e.end = Number(m[3]);
@@ -62,11 +66,11 @@ function parseOsaError(stderr) {
       if (h) e.hint = h;
       return e;
     }
-    m = ERR_BARE.exec(l);
+    m = ERR_BARE.exec(l) ?? ERR_FILE_BARE.exec(l);
     if (m) {
       const num = m[2] !== void 0 ? Number(m[2]) : void 0;
       const h = osaHint(num);
-      return { message: m[1], ...num !== void 0 ? { number: num } : {}, ...h ? { hint: h } : {} };
+      return { message: cleanMsg(m[1]), ...num !== void 0 ? { number: num } : {}, ...h ? { hint: h } : {} };
     }
   }
   return null;
@@ -86,10 +90,10 @@ async function runOsa(exec, source, lang, opts = {}) {
     const out = tmp(".scpt");
     const c = await exec("osacompile", ["-l", l, "-o", out, src], { timeoutMs: opts.timeoutMs ?? 2e4 });
     fs.rmSync(out, { force: true });
-    if (c.code !== 0) return { ok: false, compiled: false, error: parseOsaError(c.stderr) ?? { message: c.stderr.trim().slice(0, 400) || `osacompile exit ${c.code}` } };
+    if (c.code !== 0) return { ok: false, compiled: false, error: parseOsaError(c.stderr) ?? { message: cleanMsg(c.stderr.trim().slice(0, 400)) || `osacompile exit ${c.code}` } };
     if (opts.validate) return { ok: true, compiled: true };
     const r = await exec("osascript", ["-l", l, src], { timeoutMs: opts.timeoutMs ?? 6e4 });
-    if (r.code !== 0) return { ok: false, compiled: true, error: parseOsaError(r.stderr) ?? { message: r.stderr.trim().slice(0, 400) || `osascript exit ${r.code}` } };
+    if (r.code !== 0) return { ok: false, compiled: true, error: parseOsaError(r.stderr) ?? { message: cleanMsg(r.stderr.trim().slice(0, 400)) || `osascript exit ${r.code}` } };
     return { ok: true, compiled: true, output: r.stdout.replace(/\n$/, "") };
   } finally {
     fs.rmSync(src, { force: true });
@@ -121,8 +125,9 @@ async function runShortcuts(exec, op, name, input, opts = {}) {
     try {
       output = fs.readFileSync(outF, "utf8");
     } catch {
-      output = r.stdout;
+      output = "";
     }
+    if (!output.trim()) output = r.stdout;
     return { ok: true, output: output.replace(/\n$/, "") };
   } finally {
     for (const f of files) fs.rmSync(f, { force: true });
@@ -2482,4 +2487,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-G2TELC6V.js.map
+//# sourceMappingURL=chunk-64EWXYME.js.map

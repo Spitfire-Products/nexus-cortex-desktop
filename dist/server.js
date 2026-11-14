@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import {
   createDesktopMCP
-} from "./chunk-EYKNIHYN.js";
-import "./chunk-G2TELC6V.js";
+} from "./chunk-W2NM2U6A.js";
+import "./chunk-64EWXYME.js";
 import "./chunk-ZQPMRQT4.js";
 
 // src/stdio-guard.ts

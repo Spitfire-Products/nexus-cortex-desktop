@@ -1,6 +1,6 @@
 import {
   registerDesktopTool
-} from "./chunk-G2TELC6V.js";
+} from "./chunk-64EWXYME.js";
 
 // src/mcp.ts
 import os from "node:os";
@@ -22,4 +22,4 @@ async function createDesktopMCP(opts = {}) {
 export {
   createDesktopMCP
 };
-//# sourceMappingURL=chunk-EYKNIHYN.js.map
+//# sourceMappingURL=chunk-W2NM2U6A.js.map

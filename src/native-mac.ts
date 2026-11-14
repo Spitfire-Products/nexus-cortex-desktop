@@ -20,6 +20,10 @@ export type Exec = (cmd: string, args: string[], opts?: { input?: string; timeou
 // the optional file part must contain a non-digit, so a bare `33:36: execution error` (osascript -e) is read as offsets, not as file 33
 const ERR_LINE = /^(?:([^:\n]*[^\d:\n][^:\n]*):)?(?:(\d+):(\d+):|(\d+):) (?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
 const ERR_BARE = /^(?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+// JXA run from a file (m2 0.11.1 bug 1): `<path>.js: execution error: Error: Error: Can't get object. (-1728)` — a file part, no offsets
+const ERR_FILE_BARE = /^[^:\n]*[^\d:\n][^:\n]*: (?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+/** JXA wraps the message in repeated `Error: ` prefixes; keep one. Never let our temp-file path reach the model. */
+function cleanMsg(m: string): string { return m.replace(/^(?:Error: )+/, 'Error: ').replace(/\S*nexus-desktop-\d+-\d+-[a-z0-9]+\.\w+/g, '<script>').trim(); }
 
 /** What an error number means for the user (permission states from Apple's AE / AX docs, as listed in the m2 report). */
 export function osaHint(num?: number): string | undefined {
@@ -42,13 +46,13 @@ export function parseOsaError(stderr: string): OsaError | null {
     let m = ERR_LINE.exec(l);
     if (m) {
       const num = m[6] !== undefined ? Number(m[6]) : undefined;
-      const e: OsaError = { message: m[5]!, ...(num !== undefined ? { number: num } : {}) };
+      const e: OsaError = { message: cleanMsg(m[5]!), ...(num !== undefined ? { number: num } : {}) };
       if (m[2] !== undefined) { e.start = Number(m[2]); e.end = Number(m[3]); } else if (m[4] !== undefined) e.line = Number(m[4]);
       const h = osaHint(num); if (h) e.hint = h;
       return e;
     }
-    m = ERR_BARE.exec(l);
-    if (m) { const num = m[2] !== undefined ? Number(m[2]) : undefined; const h = osaHint(num); return { message: m[1]!, ...(num !== undefined ? { number: num } : {}), ...(h ? { hint: h } : {}) }; }
+    m = ERR_BARE.exec(l) ?? ERR_FILE_BARE.exec(l);
+    if (m) { const num = m[2] !== undefined ? Number(m[2]) : undefined; const h = osaHint(num); return { message: cleanMsg(m[1]!), ...(num !== undefined ? { number: num } : {}), ...(h ? { hint: h } : {}) }; }
   }
   return null;
 }
@@ -70,10 +74,10 @@ export async function runOsa(exec: Exec, source: string, lang: OsaLang, opts: { 
     const out = tmp('.scpt');
     const c = await exec('osacompile', ['-l', l, '-o', out, src], { timeoutMs: opts.timeoutMs ?? 20000 });
     fs.rmSync(out, { force: true });
-    if (c.code !== 0) return { ok: false, compiled: false, error: parseOsaError(c.stderr) ?? { message: c.stderr.trim().slice(0, 400) || `osacompile exit ${c.code}` } };
+    if (c.code !== 0) return { ok: false, compiled: false, error: parseOsaError(c.stderr) ?? { message: cleanMsg(c.stderr.trim().slice(0, 400)) || `osacompile exit ${c.code}` } };
     if (opts.validate) return { ok: true, compiled: true };
     const r = await exec('osascript', ['-l', l, src], { timeoutMs: opts.timeoutMs ?? 60000 });
-    if (r.code !== 0) return { ok: false, compiled: true, error: parseOsaError(r.stderr) ?? { message: r.stderr.trim().slice(0, 400) || `osascript exit ${r.code}` } };
+    if (r.code !== 0) return { ok: false, compiled: true, error: parseOsaError(r.stderr) ?? { message: cleanMsg(r.stderr.trim().slice(0, 400)) || `osascript exit ${r.code}` } };
     return { ok: true, compiled: true, output: r.stdout.replace(/\n$/, '') };
   } finally { fs.rmSync(src, { force: true }); }
 }
@@ -94,7 +98,9 @@ export async function runShortcuts(exec: Exec, op: 'list' | 'run', name?: string
   try {
     const r = await exec('shortcuts', args, { timeoutMs: opts.timeoutMs ?? 120000 });
     if (r.code !== 0) return { ok: false, error: stripShortcutsNoise(r.stderr) || `shortcuts run exit ${r.code}` };
-    let output = ''; try { output = fs.readFileSync(outF, 'utf8'); } catch { output = r.stdout; }
+    // without --output-type `shortcuts` leaves the -o file EMPTY and prints to stdout (m2 0.11.1 bug 2) — use stdout then
+    let output = ''; try { output = fs.readFileSync(outF, 'utf8'); } catch { output = ''; }
+    if (!output.trim()) output = r.stdout;
     return { ok: true, output: output.replace(/\n$/, '') };
   } finally { for (const f of files) fs.rmSync(f, { force: true }); }
 }
