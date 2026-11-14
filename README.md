@@ -64,6 +64,7 @@ Restart that app afterwards. `cliclick` is optional on macOS 12 and later, where
 | Mouse | `left_click` · `right_click` · `middle_click` · `double_click` · `triple_click` · `mouse_move` · `left_click_drag` · `scroll` |
 | Apps | `launch` (allowed apps only) · `focus_window` |
 | Many steps in one call | `run` (a short script of actions; `validate:true` checks it before anything moves) · `macro` (save and replay a validated sequence) |
+| macOS native automation (0.11) | `osa` (AppleScript or JXA: `validate:true` compiles only; errors return position, error number and a permission hint) · `macshortcut` (`op:list`, or `op:run` with `name`, `input`, `output_type`: runs your existing Shortcuts) |
 | Windows VM guests | `guest_*` actions through the in-guest UI Automation helper in `guest/` (Parallels and similar) |
 
 Coordinates are pixels in the screenshot the tool returned. Screenshots are scaled to `NEXUS_BROWSER_DESKTOP_MAX_WIDTH` (default 1280),

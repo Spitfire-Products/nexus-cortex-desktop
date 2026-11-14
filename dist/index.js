@@ -1,6 +1,6 @@
 import {
   createDesktopMCP
-} from "./chunk-CLKIVZCO.js";
+} from "./chunk-CRPMGPDG.js";
 import {
   AX_INTERACTIVE,
   GUEST_INTERACTIVE_CLASS,
@@ -18,11 +18,16 @@ import {
   macKeyScript,
   mergeLight,
   normRegion,
+  osaHint,
   parseCombo,
+  parseOsaError,
   registerDesktopTool,
+  runOsa,
+  runShortcuts,
+  stripShortcutsNoise,
   x11Backend,
   xdoKey
-} from "./chunk-LUBPQU6H.js";
+} from "./chunk-ZIIANQVA.js";
 import "./chunk-ZQPMRQT4.js";
 export {
   AX_INTERACTIVE,
@@ -42,8 +47,13 @@ export {
   macKeyScript,
   mergeLight,
   normRegion,
+  osaHint,
   parseCombo,
+  parseOsaError,
   registerDesktopTool,
+  runOsa,
+  runShortcuts,
+  stripShortcutsNoise,
   x11Backend,
   xdoKey
 };

@@ -12,13 +12,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { runOsa, runShortcuts, type Exec } from './native-mac.js';
 import { hotkeyFor, hotkeyCatalog, comboToKeyEquivalent, keyEquivalentTitle, parseKeyEquivalents, parseLine, substitute, MACRO_NAME, type HotkeyPlatform, validateScript, formatValidateReport, parseMenuList } from './desktop-script.js';
 
 type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.10.6';
+const VERSION = '0.11.0';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 
@@ -1296,6 +1297,23 @@ export function createDesktop(o: DesktopOptions) {
     }
     await guard();
     switch (a.action) {
+      // 0.11.0: macOS native automation — scripts and the user's own Shortcuts instead of driving the UI (guarded + audited like any action)
+      case 'osa': case 'macshortcut': {
+        if (process.platform !== 'darwin') throw new Error(`${a.action} is macOS-only`);
+        const exec: Exec = (cmd, args, o) => new Promise((res) => {
+          const c = execFile(cmd, args, { timeout: o?.timeoutMs ?? 60000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }, (err: any, stdout, stderr) =>
+            res({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
+          if (o?.input !== undefined) { c.stdin?.end(o.input); }
+        });
+        if (a.action === 'osa') {
+          if (typeof a.source !== 'string' || !a.source.trim()) throw new Error('osa needs source (AppleScript, or JXA with lang:"jxa")');
+          const r = await runOsa(exec, a.source, a.lang === 'jxa' ? 'jxa' : 'applescript', { validate: a.validate === true });
+          return { content: [text(JSON.stringify(r, null, 1))], ...(r.ok ? {} : { isError: true }) };
+        }
+        const op = a.op === 'run' ? 'run' : 'list';
+        const r = await runShortcuts(exec, op, a.name, typeof a.input === 'string' ? a.input : undefined, { outputType: a.output_type });
+        return { content: [text(JSON.stringify(r, null, 1))], ...(r.ok ? {} : { isError: true }) };
+      }
       case 'mouse_move': { const p = toScreen(a.coordinate, g); await backend.move(p); await verifyAt(p, 'mouse_move'); return after(`moved to [${a.coordinate}]`); }
       case 'left_click': case 'right_click': case 'middle_click': case 'double_click': case 'triple_click': {
         const button = a.action === 'right_click' ? 'right' : a.action === 'middle_click' ? 'middle' : 'left';
@@ -1420,6 +1438,7 @@ export function createDesktop(o: DesktopOptions) {
 }
 
 const DESCRIPTION = `KEYBOARD FIRST (standing rule): on any program you have not driven before, FIRST build its keyboard/shortcut schema — menu {list:true} (every menu item with its shortcut, macOS), hotkey {list:true}, on Windows the Alt-letter menus and underlined accelerators (Alt, then the letters; F10; Shift+F10 context menu), and the app's own shortcut list (Help / Keyboard Shortcuts / its docs) — then drive it by keys, run scripts and macros. Mouse clicks are the LAST resort (no key path exists) or for gates that need human-like movement.
+NATIVE AUTOMATION FIRST on macOS (0.11): before driving the UI, check whether a script reaches it — osa {source, lang?:"applescript"|"jxa", validate?:true} compiles (validate) or runs an AppleScript/JXA (errors come back with line or character position, error number and a permission hint), and macshortcut {op:"list"} / {op:"run", name, input?, output_type?} runs the user's EXISTING Shortcuts (System Settings toggles and Maps/Freeform/Screenshot are reachable only through Shortcuts/App Intents). Validate a script before running it.
 See and drive the WHOLE screen with mouse and keyboard (not just a browser page). Use when a task needs other apps (Disk Utility, Terminal, Finder, installers, system dialogs). Take a screenshot first; coordinates are pixels IN THAT SCREENSHOT at the size "info" reports (info.screenshot) — if your viewer shows the image downscaled, scale your coordinates back up first (0.2.3 field trap: a 640-wide render of a 1280-wide shot put a click in the wrong menu).
 FASTEST PATH (keyboard first) — always try in this order, clicks LAST: (1) a native shortcut: hotkey {name} (hotkey {list:true} = the catalog: spotlight, go_to_folder (works in every Open/Save dialog: type a path + Return), help_search (runs ANY menu item by typing its name + Return), save_as, app_switcher, menu_bar …; platform:"win" for a Windows VM) or key {text}; (2) a menu item BY NAME: menu {path:"File > Export > History", app?} (menu {list:true, top?} shows every item WITH its existing shortcut — macOS); (3) for a menu item you will use repeatedly that has no shortcut: shortcut {op:"set", app, menu_item, keys:"cmd+opt+e"} creates a real macOS App Shortcut (the app must be quit + reopened; op:"remove" undoes it); (4) a whole multi-step task in ONE call: run {script} — one command per line: hotkey NAME · key COMBO… · type TEXT · paste TEXT · fill X,Y [commit=tab|enter|none] [delay=MS] [escape] [paste] -- TEXT · click|dclick|tclick|rclick X,Y · move X,Y · drag X1,Y1 X2,Y2 · scroll X,Y DIR [N] · menu A > B [@App] · shortcut App | Item | keys · launch APP · focus WINDOW · wait SECONDS (1–2, never milliseconds) · wait_window REGEX [S] · zoom X1,Y1,X2,Y2 · screenshot · set NAME VALUE · macro NAME [k=v…] · # comment; \${name} = a variable; stops at the first failing line and says which; save a working sequence with macro {op:"save", name, script, description} and replay it with run {macro, vars} — macros are your own created shortcuts (macro {op:"list"}) — CHECK a new or long script FIRST with run {script, validate:true} (or macro {op:"validate", name}): nothing runs, every line is checked (vars, hotkey names, key combos, live menu paths, nested macros, allow-list, coordinates) and errors come back with line numbers + suggestions; (5) only then single clicks.
 CONTEXT + EVENTS (0.6): context = one compact header (front app + window + focused element, every window, the Windows guest's front window and focus when its helper runs, scan freshness, watch state, recent events, safety) — call it FIRST and whenever you are unsure what is on screen; it is far cheaper than a screenshot. watch {op:"start", paths?, interval_ms?, guest?} then streams events (app_activated, window_opened [dialog], window_closed, window_focused, window_retitled, focus_changed, value_changed as a character COUNT only, app_launched/quit, file_created/changed/removed in watched folders, guest:… for the VM) and EVERY later desktop result ends with the events you have not seen, split into "during this action" (its effects: the dialog that opened, the window that closed) and "since your last call" (things that happened on their own: a download landing, an alert). React to events instead of re-screenshotting; watch {op:"events"} lists them, watch {op:"status"} shows poll cost. Acting on a ref whose window has since closed or been retitled returns a WARNING — rescan. Events are also appended to desktop-events.jsonl in the home folder.
@@ -1438,7 +1457,11 @@ export function registerDesktopTool(server: any, home: string) {
     action: z.enum(['screenshot', 'info', 'left_click', 'right_click', 'middle_click', 'double_click', 'triple_click', 'mouse_move', 'left_click_drag',
       'scroll', 'type', 'key', 'cursor_position', 'wait', 'zoom', 'launch', 'windows', 'focus_window', 'stats', 'fill_field',
       'hotkey', 'menu', 'shortcut', 'run', 'macro', 'scan', 'grab', 'press', 'set_value',
-      'guest_ping', 'guest_windows', 'guest_scan', 'guest_grab', 'guest_press', 'guest_set_value', 'guest_focus', 'context', 'watch', 'app', 'bus']),
+      'guest_ping', 'guest_windows', 'guest_scan', 'guest_grab', 'guest_press', 'guest_set_value', 'guest_focus', 'context', 'watch', 'app', 'bus', 'osa', 'macshortcut']),
+    source: z.string().optional().describe('osa: the AppleScript (default) or JXA source'),
+    lang: z.enum(['applescript', 'jxa']).optional().describe('osa: script language (default applescript)'),
+    input: z.string().optional().describe('macshortcut run: text passed to the shortcut as its input'),
+    output_type: z.string().optional().describe('macshortcut run: output UTI, e.g. public.plain-text'),
     ref: z.string().optional().describe('scan ref like "e12" — for grab / press / set_value / clicks'),
     filter: z.object({ role: z.string().optional(), hasText: z.string().optional(), interactive: z.boolean().optional() }).optional().describe('scan: role (e.g. "Button", "TextField"), hasText (title/description/value contains), interactive'),
     max: z.number().int().min(10).max(2000).optional().describe('scan: max elements walked (default 250)'),

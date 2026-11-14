@@ -4,3 +4,4 @@
 export * from './desktop.js';
 export { createDesktopMCP } from './mcp.js';
 export type { DesktopMCPOptions } from './mcp.js';
+export { parseOsaError, osaHint, stripShortcutsNoise, runOsa, runShortcuts } from './native-mac.js';

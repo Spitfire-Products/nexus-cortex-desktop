@@ -14,11 +14,123 @@ import {
 
 // src/desktop.ts
 import { execFile, spawn } from "node:child_process";
+import fs2 from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
+import { z } from "zod";
+
+// src/native-mac.ts
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { z } from "zod";
-var VERSION = "0.10.6";
+var ERR_LINE = /^(?:([^:\n]*[^\d:\n][^:\n]*):)?(?:(\d+):(\d+):|(\d+):) (?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+var ERR_BARE = /^(?:execution )?error: (.*?)(?: \((-?\d+)\))?$/;
+function osaHint(num) {
+  switch (num) {
+    case -1743:
+      return "Automation is not allowed for this app: System Settings \u2192 Privacy & Security \u2192 Automation \u2192 allow the terminal to control it.";
+    case -1744:
+      return "macOS will ask the user to allow Automation for this app \u2014 the first call shows a prompt; ask the user to accept it.";
+    case -1719:
+    case -25211:
+      return "Accessibility is not granted to the terminal app (System Settings \u2192 Privacy & Security \u2192 Accessibility).";
+    case -600:
+      return "The target app is not running \u2014 launch it first.";
+    case -1728:
+      return "The object does not exist (check the name/index against the app dictionary).";
+    case -2741:
+    case -2740:
+    case -2700:
+      return "Syntax error \u2014 fix the script at the reported position and validate again.";
+    default:
+      return void 0;
+  }
+}
+function parseOsaError(stderr) {
+  for (const raw of stderr.split(/\r?\n/)) {
+    const l = raw.trim();
+    if (!l) continue;
+    let m = ERR_LINE.exec(l);
+    if (m) {
+      const num = m[6] !== void 0 ? Number(m[6]) : void 0;
+      const e = { message: m[5], ...num !== void 0 ? { number: num } : {} };
+      if (m[2] !== void 0) {
+        e.start = Number(m[2]);
+        e.end = Number(m[3]);
+      } else if (m[4] !== void 0) e.line = Number(m[4]);
+      const h = osaHint(num);
+      if (h) e.hint = h;
+      return e;
+    }
+    m = ERR_BARE.exec(l);
+    if (m) {
+      const num = m[2] !== void 0 ? Number(m[2]) : void 0;
+      const h = osaHint(num);
+      return { message: m[1], ...num !== void 0 ? { number: num } : {}, ...h ? { hint: h } : {} };
+    }
+  }
+  return null;
+}
+function stripShortcutsNoise(stderr) {
+  return stderr.split(/\r?\n/).filter((l) => l.trim() && !/Unrecognized attribute string flag/.test(l)).join("\n").trim();
+}
+function tmp(ext) {
+  return path.join(os.tmpdir(), `nexus-desktop-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+}
+async function runOsa(exec, source, lang, opts = {}) {
+  const ext = lang === "jxa" ? ".js" : ".applescript";
+  const src = tmp(ext);
+  fs.writeFileSync(src, source, "utf8");
+  const l = lang === "jxa" ? "JavaScript" : "AppleScript";
+  try {
+    const out = tmp(".scpt");
+    const c = await exec("osacompile", ["-l", l, "-o", out, src], { timeoutMs: opts.timeoutMs ?? 2e4 });
+    fs.rmSync(out, { force: true });
+    if (c.code !== 0) return { ok: false, compiled: false, error: parseOsaError(c.stderr) ?? { message: c.stderr.trim().slice(0, 400) || `osacompile exit ${c.code}` } };
+    if (opts.validate) return { ok: true, compiled: true };
+    const r = await exec("osascript", ["-l", l, src], { timeoutMs: opts.timeoutMs ?? 6e4 });
+    if (r.code !== 0) return { ok: false, compiled: true, error: parseOsaError(r.stderr) ?? { message: r.stderr.trim().slice(0, 400) || `osascript exit ${r.code}` } };
+    return { ok: true, compiled: true, output: r.stdout.replace(/\n$/, "") };
+  } finally {
+    fs.rmSync(src, { force: true });
+  }
+}
+async function runShortcuts(exec, op, name, input, opts = {}) {
+  if (op === "list") {
+    const r = await exec("shortcuts", ["list"], { timeoutMs: opts.timeoutMs ?? 2e4 });
+    if (r.code !== 0) return { ok: false, error: stripShortcutsNoise(r.stderr) || `shortcuts list exit ${r.code}` };
+    return { ok: true, names: r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) };
+  }
+  if (!name) return { ok: false, error: "run needs the shortcut name" };
+  const args = ["run", name];
+  const files = [];
+  if (typeof input === "string") {
+    const f = tmp(".txt");
+    fs.writeFileSync(f, input, "utf8");
+    files.push(f);
+    args.push("-i", f);
+  }
+  const outF = tmp(".out");
+  files.push(outF);
+  args.push("-o", outF);
+  if (opts.outputType) args.push("--output-type", opts.outputType);
+  try {
+    const r = await exec("shortcuts", args, { timeoutMs: opts.timeoutMs ?? 12e4 });
+    if (r.code !== 0) return { ok: false, error: stripShortcutsNoise(r.stderr) || `shortcuts run exit ${r.code}` };
+    let output = "";
+    try {
+      output = fs.readFileSync(outF, "utf8");
+    } catch {
+      output = r.stdout;
+    }
+    return { ok: true, output: output.replace(/\n$/, "") };
+  } finally {
+    for (const f of files) fs.rmSync(f, { force: true });
+  }
+}
+
+// src/desktop.ts
+var VERSION = "0.11.0";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -129,9 +241,9 @@ var run = (cmd, args, env, input, timeoutMs = 3e4) => new Promise((resolve, reje
   }
 });
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-var onPath = (bin) => (process.env.PATH ?? "").split(path.delimiter).some((d) => {
+var onPath = (bin) => (process.env.PATH ?? "").split(path2.delimiter).some((d) => {
   try {
-    fs.accessSync(path.join(d, bin), fs.constants.X_OK);
+    fs2.accessSync(path2.join(d, bin), fs2.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -340,7 +452,7 @@ function x11Backend(display, apps) {
       const ids = String(await xdo("search", "--onlyvisible", "--name", ".").catch(() => Buffer.from(""))).trim().split("\n").filter(Boolean).slice(0, 40);
       const comm = (pid) => {
         try {
-          return fs.readFileSync(`/proc/${pid}/comm`, "utf8").trim();
+          return fs2.readFileSync(`/proc/${pid}/comm`, "utf8").trim();
         } catch {
           return "?";
         }
@@ -495,7 +607,7 @@ function macBackend(apps, useCliclick = onPath("cliclick")) {
     throw e;
   });
   const cc = (...a) => run("cliclick", ["-e", "40", ...a]);
-  const tmp = () => path.join(os.tmpdir(), `nexus-desktop-${process.pid}-${Date.now()}.png`);
+  const tmp2 = () => path2.join(os2.tmpdir(), `nexus-desktop-${process.pid}-${Date.now()}.png`);
   return {
     name: `macos (${useCliclick ? "cliclick" : "CoreGraphics"})`,
     async size() {
@@ -538,16 +650,16 @@ function macBackend(apps, useCliclick = onPath("cliclick")) {
       return out;
     },
     async capture(w, h, region) {
-      const f = tmp(), g = tmp();
+      const f = tmp2(), g = tmp2();
       try {
         const r = region ? ["-R", `${region[0]},${region[1]},${region[2] - region[0]},${region[3] - region[1]}`] : ["-m"];
         await run("screencapture", ["-x", "-t", "png", ...r, f]);
         await run("sips", ["-z", String(h), String(w), f, "--out", g]);
-        return fs.readFileSync(g);
+        return fs2.readFileSync(g);
       } finally {
         for (const p of [f, g]) {
           try {
-            fs.unlinkSync(p);
+            fs2.unlinkSync(p);
           } catch {
           }
         }
@@ -684,8 +796,8 @@ function createDesktop(o) {
   const apps = o.apps ?? (process.env.NEXUS_BROWSER_DESKTOP_APPS ? process.env.NEXUS_BROWSER_DESKTOP_APPS.split(",").map((s) => s.trim()).filter(Boolean) : DEFAULT_APPS);
   const backend = o.backend ?? (process.platform === "darwin" && o.mode === "real" ? macBackend(apps) : x11Backend(o.display ?? process.env.NEXUS_BROWSER_DESKTOP_DISPLAY ?? (o.mode === "virtual" ? ":99" : process.env.DISPLAY ?? ":0"), apps));
   const maxW = o.maxWidth ?? Number(process.env.NEXUS_BROWSER_DESKTOP_MAX_WIDTH ?? 1280);
-  const stopFile = path.join(o.home, "DESKTOP_STOP");
-  const logFile = path.join(o.home, "desktop-actions.log");
+  const stopFile = path2.join(o.home, "DESKTOP_STOP");
+  const logFile = path2.join(o.home, "desktop-actions.log");
   let geo = null;
   let spot;
   async function failsafeCorner() {
@@ -738,8 +850,8 @@ function createDesktop(o) {
   }
   function audit(entry) {
     try {
-      fs.mkdirSync(o.home, { recursive: true });
-      fs.appendFileSync(logFile, JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), mode: o.mode, ...entry }) + "\n");
+      fs2.mkdirSync(o.home, { recursive: true });
+      fs2.appendFileSync(logFile, JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), mode: o.mode, ...entry }) + "\n");
     } catch {
     }
   }
@@ -747,7 +859,7 @@ function createDesktop(o) {
   function summarize(sinceMin, logPath) {
     let rows = [];
     try {
-      rows = fs.readFileSync(logPath ?? logFile, "utf8").trim().split("\n").filter(Boolean).map((l) => {
+      rows = fs2.readFileSync(logPath ?? logFile, "utf8").trim().split("\n").filter(Boolean).map((l) => {
         try {
           return JSON.parse(l);
         } catch {
@@ -795,13 +907,13 @@ function createDesktop(o) {
   async function guard() {
     if ((await perms()).accessibility === false) throw new Error("macOS permission missing: Accessibility is not granted to the app running this agent (System Preferences \u2192 Security & Privacy \u2192 Privacy \u2192 Accessibility), so clicks and keys would be silently ignored. Restart that app after granting.");
     if (stopLatched) {
-      if (!fs.existsSync(stopFile) && !stopVanishLogged) {
+      if (!fs2.existsSync(stopFile) && !stopVanishLogged) {
         stopVanishLogged = true;
         audit({ action: "stop_file_removed_while_latched", ok: false, err_class: "stopped" });
       }
       throw new Error(STOP_MSG(stopLatched));
     }
-    if (fs.existsSync(stopFile)) {
+    if (fs2.existsSync(stopFile)) {
       stopLatched = "stop file present";
       throw new Error(STOP_MSG(stopLatched));
     }
@@ -815,8 +927,8 @@ function createDesktop(o) {
         if (!onSpot) disarmedOnSpot = false;
         if (onSpot && !disarmedOnSpot) {
           disarmedOnSpot = true;
-          fs.mkdirSync(o.home, { recursive: true });
-          fs.writeFileSync(stopFile, `failsafe tripped ${(/* @__PURE__ */ new Date()).toISOString()} (cursor parked at the ${fc} failsafe spot)
+          fs2.mkdirSync(o.home, { recursive: true });
+          fs2.writeFileSync(stopFile, `failsafe tripped ${(/* @__PURE__ */ new Date()).toISOString()} (cursor parked at the ${fc} failsafe spot)
 `);
           stopLatched = `failsafe tripped: cursor parked at the ${fc} spot`;
           throw new Error(`FAILSAFE: ${STOP_MSG(stopLatched)}`);
@@ -824,15 +936,15 @@ function createDesktop(o) {
       }
     }
   }
-  const macroDir = path.join(o.home, "macros");
+  const macroDir = path2.join(o.home, "macros");
   const macroPath = (name) => {
     if (!MACRO_NAME.test(name ?? "")) throw new Error("macro name: letters, digits, _ and - (max 64)");
-    return path.join(macroDir, `${name}.json`);
+    return path2.join(macroDir, `${name}.json`);
   };
   const readMacro = (name) => {
     const f = macroPath(name);
-    if (!fs.existsSync(f)) throw new Error(`no macro "${name}" \u2014 macro {op:"list"} shows the saved ones`);
-    return JSON.parse(fs.readFileSync(f, "utf8"));
+    if (!fs2.existsSync(f)) throw new Error(`no macro "${name}" \u2014 macro {op:"list"} shows the saved ones`);
+    return JSON.parse(fs2.readFileSync(f, "utf8"));
   };
   const platformOf = (a) => a.platform ?? (backend.name.startsWith("macos") ? "mac" : "win");
   const quietSrc = (st) => st.kind === "action" && (st.action.action === "type" || st.action.action === "fill_field") ? `${st.src.split(/\s+/)[0]} (${String(st.action.text ?? "").length} chars)` : st.src.slice(0, 90);
@@ -888,7 +1000,7 @@ function createDesktop(o) {
   async function validateOp(src, vars, liveMenus) {
     let names = [];
     try {
-      names = fs.readdirSync(macroDir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
+      names = fs2.readdirSync(macroDir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
     } catch {
     }
     const rm = (n) => {
@@ -933,11 +1045,11 @@ function createDesktop(o) {
     if (op === "list") {
       let names = [];
       try {
-        names = fs.readdirSync(macroDir).filter((f) => f.endsWith(".json"));
+        names = fs2.readdirSync(macroDir).filter((f) => f.endsWith(".json"));
       } catch {
       }
       return { content: [text(names.map((f) => {
-        const m = JSON.parse(fs.readFileSync(path.join(macroDir, f), "utf8"));
+        const m = JSON.parse(fs2.readFileSync(path2.join(macroDir, f), "utf8"));
         return `${m.name}	${m.description ?? ""}`;
       }).join("\n") || '(no macros yet \u2014 macro {op:"save", name, script, description})')] };
     }
@@ -946,31 +1058,31 @@ function createDesktop(o) {
       return { content: [text(JSON.stringify(m, null, 1))] };
     }
     if (op === "delete") {
-      fs.unlinkSync(macroPath(a.name));
+      fs2.unlinkSync(macroPath(a.name));
       return { content: [text(`deleted macro ${a.name}`)] };
     }
     if (op === "save") {
       if (typeof a.script !== "string" || !a.script.trim()) throw new Error("macro save needs script");
       a.script.split("\n").forEach((l, i) => parseLine(l.replace(/\$\{[A-Za-z_]\w*\}/g, "0"), i + 1));
-      fs.mkdirSync(macroDir, { recursive: true });
-      fs.writeFileSync(macroPath(a.name), JSON.stringify({ name: a.name, description: a.description ?? "", script: a.script, saved_at: (/* @__PURE__ */ new Date()).toISOString() }, null, 1));
+      fs2.mkdirSync(macroDir, { recursive: true });
+      fs2.writeFileSync(macroPath(a.name), JSON.stringify({ name: a.name, description: a.description ?? "", script: a.script, saved_at: (/* @__PURE__ */ new Date()).toISOString() }, null, 1));
       return { content: [text(`saved macro ${a.name} (${a.script.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).length} steps) \u2014 run with {action:"run", macro:"${a.name}", vars:{\u2026}}`)] };
     }
     throw new Error(`macro op ${op}: list | show | save | delete | validate`);
   }
   let lastScan = null;
-  const axScanFile = path.join(o.home, "last-ax-scan.json"), guestScanFile = path.join(o.home, "last-guest-scan.json");
+  const axScanFile = path2.join(o.home, "last-ax-scan.json"), guestScanFile = path2.join(o.home, "last-guest-scan.json");
   const persist = (file, v) => {
     try {
-      fs.mkdirSync(o.home, { recursive: true });
-      fs.writeFileSync(`${file}.tmp`, JSON.stringify(v));
-      fs.renameSync(`${file}.tmp`, file);
+      fs2.mkdirSync(o.home, { recursive: true });
+      fs2.writeFileSync(`${file}.tmp`, JSON.stringify(v));
+      fs2.renameSync(`${file}.tmp`, file);
     } catch {
     }
   };
   const restore = (file) => {
     try {
-      const v = JSON.parse(fs.readFileSync(file, "utf8"));
+      const v = JSON.parse(fs2.readFileSync(file, "utf8"));
       return v && Array.isArray(v.els) ? v : null;
     } catch {
       return null;
@@ -994,7 +1106,7 @@ function createDesktop(o) {
     const label = el.t || el.d;
     return `e${i + 1}	${el.r.replace(/^AX/, "")}${el.sr ? `/${el.sr.replace(/^AX/, "")}` : ""}	${label ? JSON.stringify(label.slice(0, 80)) : "-"}	@[${cx},${cy}] ${Math.round(el.w / g.f)}\xD7${Math.round(el.h / g.f)}${el.v && el.v !== label ? `	value=${JSON.stringify(el.v.slice(0, 60))}` : ""}${el.e ? "" : "	(disabled)"}${el.f ? "	(focused)" : ""}`;
   };
-  const guestDir = o.guestDir ?? process.env.NEXUS_BROWSER_GUEST_DIR ?? path.join(os.homedir(), "nexus-guest-bridge");
+  const guestDir = o.guestDir ?? process.env.NEXUS_BROWSER_GUEST_DIR ?? path2.join(os2.homedir(), "nexus-guest-bridge");
   let lastGuestScan = null;
   const GUEST_START = `start it INSIDE the VM: Win+R \u2192 powershell -ExecutionPolicy Bypass -NoExit -File "\\\\psf\\Home\\nexus-guest-bridge\\nexus-guest-uia.ps1" (Parallels shared Home = \\\\psf\\Home; some setups use \\\\Mac\\Home \u2014 pass -Bridge then) after copying guest/nexus-guest-uia.ps1 from the package into ${guestDir}; click a guest window first so Win+R reaches the guest`;
   let guestInflight = 0;
@@ -1007,29 +1119,29 @@ function createDesktop(o) {
     }
   }
   async function guestCallInner(op, args, timeoutMs) {
-    const alive = path.join(guestDir, "helper-alive.json");
+    const alive = path2.join(guestDir, "helper-alive.json");
     let beat = null;
     try {
-      beat = JSON.parse(fs.readFileSync(alive, "utf8"));
+      beat = JSON.parse(fs2.readFileSync(alive, "utf8"));
     } catch {
     }
     if (!beat || Date.now() - Date.parse(beat.ts) > 15e3) throw new Error(`the in-guest helper is not running (no heartbeat in ${guestDir} for 15 s) \u2014 ${GUEST_START}`);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const req = path.join(guestDir, `req-${id}.json`), resp = path.join(guestDir, `resp-${id}.json`);
-    fs.writeFileSync(`${req}.tmp`, JSON.stringify({ op, ...args }));
-    fs.renameSync(`${req}.tmp`, req);
+    const req = path2.join(guestDir, `req-${id}.json`), resp = path2.join(guestDir, `resp-${id}.json`);
+    fs2.writeFileSync(`${req}.tmp`, JSON.stringify({ op, ...args }));
+    fs2.renameSync(`${req}.tmp`, req);
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
-      if (fs.existsSync(resp)) {
+      if (fs2.existsSync(resp)) {
         let r;
         try {
-          r = JSON.parse(fs.readFileSync(resp, "utf8"));
+          r = JSON.parse(fs2.readFileSync(resp, "utf8"));
         } catch {
           await sleep(50);
           continue;
         }
         try {
-          fs.unlinkSync(resp);
+          fs2.unlinkSync(resp);
         } catch {
         }
         if (!r.ok) throw new Error(`guest helper: ${r.error ?? "failed"}`);
@@ -1038,7 +1150,7 @@ function createDesktop(o) {
       await sleep(80);
     }
     try {
-      fs.unlinkSync(req);
+      fs2.unlinkSync(req);
     } catch {
     }
     throw new Error(`the in-guest helper did not answer ${op} within ${Math.round(timeoutMs / 1e3)} s`);
@@ -1103,7 +1215,7 @@ ${el.aid}`.toLowerCase().includes(q2) : true) && (a.include_hidden ? true : !el.
     }
     throw new Error(`unknown guest action ${a.action}`);
   }
-  const eventsFile = path.join(o.home, "desktop-events.jsonl");
+  const eventsFile = path2.join(o.home, "desktop-events.jsonl");
   const ring = [];
   let evSeq = 0, delivered = 0;
   let hostState = null, guestSt = null;
@@ -1142,19 +1254,19 @@ ${el.aid}`.toLowerCase().includes(q2) : true) && (a.include_hidden ? true : !el.
       ring.push(full);
       if (ring.length > 300) ring.shift();
       try {
-        fs.mkdirSync(o.home, { recursive: true });
+        fs2.mkdirSync(o.home, { recursive: true });
         try {
-          if (fs.statSync(eventsFile).size > 5e6) fs.renameSync(eventsFile, `${eventsFile}.1`);
+          if (fs2.statSync(eventsFile).size > 5e6) fs2.renameSync(eventsFile, `${eventsFile}.1`);
         } catch {
         }
-        fs.appendFileSync(eventsFile, JSON.stringify(full) + "\n");
+        fs2.appendFileSync(eventsFile, JSON.stringify(full) + "\n");
       } catch {
       }
     }
   }
   const guestAlive = () => {
     try {
-      return Date.now() - Date.parse(JSON.parse(fs.readFileSync(path.join(guestDir, "helper-alive.json"), "utf8")).ts) < 15e3;
+      return Date.now() - Date.parse(JSON.parse(fs2.readFileSync(path2.join(guestDir, "helper-alive.json"), "utf8")).ts) < 15e3;
     } catch {
       return false;
     }
@@ -1238,9 +1350,9 @@ ${el.aid}`.toLowerCase().includes(q2) : true) && (a.include_hidden ? true : !el.
     if (Date.now() - W.lastSweep > 6e4) {
       W.lastSweep = Date.now();
       try {
-        for (const f of fs.readdirSync(guestDir)) if (/^resp-.*\.json$/.test(f)) {
-          const p = path.join(guestDir, f);
-          if (Date.now() - fs.statSync(p).mtimeMs > 12e4) fs.unlinkSync(p);
+        for (const f of fs2.readdirSync(guestDir)) if (/^resp-.*\.json$/.test(f)) {
+          const p = path2.join(guestDir, f);
+          if (Date.now() - fs2.statSync(p).mtimeMs > 12e4) fs2.unlinkSync(p);
         }
       } catch {
       }
@@ -1260,23 +1372,23 @@ ${el.aid}`.toLowerCase().includes(q2) : true) && (a.include_hidden ? true : !el.
     W.timer.unref?.();
   }
   function watchPath(p) {
-    const abs = path.resolve(p);
-    const st = fs.statSync(abs);
-    const dir = st.isDirectory() ? abs : path.dirname(abs), only = st.isDirectory() ? null : path.basename(abs);
+    const abs = path2.resolve(p);
+    const st = fs2.statSync(abs);
+    const dir = st.isDirectory() ? abs : path2.dirname(abs), only = st.isDirectory() ? null : path2.basename(abs);
     const known = /* @__PURE__ */ new Set();
     try {
-      for (const f of fs.readdirSync(dir)) known.add(f);
+      for (const f of fs2.readdirSync(dir)) known.add(f);
     } catch {
     }
     const pending = /* @__PURE__ */ new Map();
-    const w = fs.watch(dir, { persistent: false }, (_t, name) => {
+    const w = fs2.watch(dir, { persistent: false }, (_t, name) => {
       const f = String(name ?? "");
       if (!f || only && f !== only || /^\.|\.(tmp|crdownload|part|download)$/i.test(f)) return;
       clearTimeout(pending.get(f));
       pending.set(f, setTimeout(() => {
         pending.delete(f);
-        const full = path.join(dir, f);
-        const exists = fs.existsSync(full);
+        const full = path2.join(dir, f);
+        const exists = fs2.existsSync(full);
         pushEvents([{ type: !exists ? "file_removed" : known.has(f) ? "file_changed" : "file_created", src: "fs", path: full }]);
         if (exists) known.add(f);
         else known.delete(f);
@@ -1385,7 +1497,7 @@ ${xs.slice(-8).map((e) => `  ${fmtEvent(e)}`).join("\n")}${xs.length > 8 ? `
     let guestErr = "";
     let hs = null;
     const guestBusy = guestInflight > 0;
-    const guestP = fs.existsSync(guestDir) && guestAlive() && !guestBusy ? fetchGuestState(6e3).catch((e) => {
+    const guestP = fs2.existsSync(guestDir) && guestAlive() && !guestBusy ? fetchGuestState(6e3).catch((e) => {
       guestErr = String(e?.message ?? e).slice(0, 160);
       return null;
     }) : Promise.resolve(null);
@@ -1409,7 +1521,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       L.push(`windows (${hs.windows.length}${hs.windows.length > lim ? `, first ${lim}` : ""}):`, ...hs.windows.slice(0, lim).map(winLine));
     }
     let gsSeen = null;
-    if (fs.existsSync(guestDir)) {
+    if (fs2.existsSync(guestDir)) {
       if (!guestAlive()) L.push("guest: helper not running (no heartbeat) \u2014 guest_ping says how to start it");
       else if (guestBusy) L.push("guest: helper busy with another request \u2014 skipped");
       else {
@@ -1443,10 +1555,10 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       delivered = evSeq;
     }
     const fc = await failsafeCorner().catch(() => null);
-    L.push(`safety: failsafe ${fc ?? "off"}${stopLatched ? ` \u2014 STOPPED by the user (${stopLatched}); do not act, report to the user` : fs.existsSync(stopFile) ? " \u2014 STOPPED by the user; do not act, report to the user" : ""}`);
+    L.push(`safety: failsafe ${fc ?? "off"}${stopLatched ? ` \u2014 STOPPED by the user (${stopLatched}); do not act, report to the user` : fs2.existsSync(stopFile) ? " \u2014 STOPPED by the user; do not act, report to the user" : ""}`);
     return { content: [{ type: "text", text: L.join("\n") }] };
   }
-  const appsDir = path.join(o.home, "apps");
+  const appsDir = path2.join(o.home, "apps");
   function loadProfiles() {
     const dirs = [appsDir, ...String(process.env.NEXUS_BROWSER_DESKTOP_PROFILES ?? "").split(":").filter(Boolean)];
     const out = [];
@@ -1454,16 +1566,16 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
     for (const d of dirs) {
       let files = [];
       try {
-        files = fs.readdirSync(d).filter((f) => f.endsWith(".json")).sort();
+        files = fs2.readdirSync(d).filter((f) => f.endsWith(".json")).sort();
       } catch {
         continue;
       }
       for (const f of files) {
         try {
-          const p = JSON.parse(fs.readFileSync(path.join(d, f), "utf8"));
+          const p = JSON.parse(fs2.readFileSync(path2.join(d, f), "utf8"));
           if (p && typeof p.id === "string" && p.match && !seen.has(p.id)) {
             seen.add(p.id);
-            p.__file = path.join(d, f);
+            p.__file = path2.join(d, f);
             out.push(p);
           }
         } catch {
@@ -1538,12 +1650,12 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
     ];
   }
   function saveProfile(p) {
-    const file = p.__file && p.__file.startsWith(appsDir) ? p.__file : path.join(appsDir, `${p.id}.json`);
+    const file = p.__file && p.__file.startsWith(appsDir) ? p.__file : path2.join(appsDir, `${p.id}.json`);
     const { __file, ...body } = p;
     void __file;
-    fs.mkdirSync(appsDir, { recursive: true });
-    fs.writeFileSync(`${file}.tmp`, JSON.stringify(body, null, 1));
-    fs.renameSync(`${file}.tmp`, file);
+    fs2.mkdirSync(appsDir, { recursive: true });
+    fs2.writeFileSync(`${file}.tmp`, JSON.stringify(body, null, 1));
+    fs2.renameSync(`${file}.tmp`, file);
     return file;
   }
   const getProfile = (name) => {
@@ -1558,7 +1670,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       const ps = loadProfiles();
       let front = null;
       try {
-        front = activeProfile(backend.state ? await backend.state({ full: false }) : null, fs.existsSync(guestDir) && guestAlive() && guestInflight === 0 ? await fetchGuestState(5e3).catch(() => null) : null);
+        front = activeProfile(backend.state ? await backend.state({ full: false }) : null, fs2.existsSync(guestDir) && guestAlive() && guestInflight === 0 ? await fetchGuestState(5e3).catch(() => null) : null);
       } catch {
       }
       return { content: [text(ps.length ? ps.map((p) => `${p.id}	${p.name}	${(p.shortcuts ?? []).length} shortcuts, ${(p.macros ?? []).length} macros${front?.p.id === p.id ? `	<- IN FRONT (context ${front.ctx ?? "-"})` : ""}`).join("\n") : `(no app profiles \u2014 put <app>.json files in ${appsDir} or a dir named by NEXUS_BROWSER_DESKTOP_PROFILES; app {op:"save", profile_json})`)] };
@@ -1649,12 +1761,12 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
     startedAt: ""
   };
   const readKey = () => {
-    const k = B.keyFile ? fs.readFileSync(B.keyFile, "utf8").trim() : String(process.env.NEXUS_BROWSER_DESKTOP_BUS_KEY ?? "").trim();
+    const k = B.keyFile ? fs2.readFileSync(B.keyFile, "utf8").trim() : String(process.env.NEXUS_BROWSER_DESKTOP_BUS_KEY ?? "").trim();
     if (!/^nrl_[A-Za-z0-9_-]{8,}$/.test(k)) throw new Error(`no relay key \u2014 put the user's nrl_ key (ADMIN \u2192 Relay MCP API Keys, allowed_tools ["desktop_events"]) in a 0600 file and pass key_file (or NEXUS_BROWSER_DESKTOP_BUS_KEY_FILE)`);
-    if (B.keyFile && fs.statSync(B.keyFile).mode & 63) throw new Error(`${B.keyFile} is readable by others \u2014 chmod 600 it`);
+    if (B.keyFile && fs2.statSync(B.keyFile).mode & 63) throw new Error(`${B.keyFile} is readable by others \u2014 chmod 600 it`);
     return k;
   };
-  const redact = (e) => B.titles ? e : { ...e, title: e.title ? "(title hidden)" : e.title, from: e.from ? "(hidden)" : e.from, to: e.to ? "(hidden)" : e.to, path: e.path ? path.basename(e.path) : e.path };
+  const redact = (e) => B.titles ? e : { ...e, title: e.title ? "(title hidden)" : e.title, from: e.from ? "(hidden)" : e.from, to: e.to ? "(hidden)" : e.to, path: e.path ? path2.basename(e.path) : e.path };
   function frontSnapshot() {
     const ap = (() => {
       try {
@@ -1733,10 +1845,10 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
     if (B.timer) clearTimeout(B.timer);
     B.timer = null;
   }
-  const busPidFile = path.join(o.home, "bus.pid"), busStatusFile = path.join(o.home, "bus-status.json");
+  const busPidFile = path2.join(o.home, "bus.pid"), busStatusFile = path2.join(o.home, "bus-status.json");
   const daemonPid = () => {
     try {
-      const pid = Number(fs.readFileSync(busPidFile, "utf8").trim());
+      const pid = Number(fs2.readFileSync(busPidFile, "utf8").trim());
       if (pid > 0 && pid !== process.pid) {
         process.kill(pid, 0);
         return pid;
@@ -1747,7 +1859,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
   };
   const readDaemonStatus = () => {
     try {
-      return JSON.parse(fs.readFileSync(busStatusFile, "utf8"));
+      return JSON.parse(fs2.readFileSync(busStatusFile, "utf8"));
     } catch {
       return null;
     }
@@ -1763,7 +1875,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       for (let i = 0; i < 30 && daemonPid(); i++) await sleep(200);
     }
     try {
-      fs.unlinkSync(busStatusFile);
+      fs2.unlinkSync(busStatusFile);
     } catch {
     }
     const { detach: _d, action: _a, op: _o, ...rest } = a;
@@ -1771,16 +1883,16 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
     void _a;
     void _o;
     const script = new URL("./desktop-bus-daemon.js", import.meta.url);
-    if (!fs.existsSync(script)) throw new Error(`bus daemon script missing (${script.pathname}) \u2014 reinstall the package, or pass detach:false to run the bus inside this process`);
-    fs.mkdirSync(o.home, { recursive: true });
-    const log = fs.openSync(path.join(o.home, "bus-daemon.log"), "a");
+    if (!fs2.existsSync(script)) throw new Error(`bus daemon script missing (${script.pathname}) \u2014 reinstall the package, or pass detach:false to run the bus inside this process`);
+    fs2.mkdirSync(o.home, { recursive: true });
+    const log = fs2.openSync(path2.join(o.home, "bus-daemon.log"), "a");
     const child = spawn(process.execPath, [script.pathname], {
       detached: true,
       stdio: ["ignore", log, log],
       env: { ...process.env, NEXUS_BROWSER_DESKTOP_HOME: o.home, NEXUS_BROWSER_DESKTOP: o.mode, NEXUS_BROWSER_GUEST_DIR: guestDir, NEXUS_BUS_ARGS: JSON.stringify(rest) }
     });
     child.unref();
-    fs.closeSync(log);
+    fs2.closeSync(log);
     for (let i = 0; i < 100; i++) {
       const st = readDaemonStatus();
       if (st?.start_result) {
@@ -1788,7 +1900,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       }
       await sleep(200);
     }
-    return { content: [text(`bus daemon spawned (pid ${child.pid}) but reported nothing in 20 s \u2014 see ${path.join(o.home, "bus-daemon.log")}`)], isError: true };
+    return { content: [text(`bus daemon spawned (pid ${child.pid}) but reported nothing in 20 s \u2014 see ${path2.join(o.home, "bus-daemon.log")}`)], isError: true };
   }
   async function busOp(a) {
     const text = (t) => ({ type: "text", text: t });
@@ -1798,7 +1910,7 @@ ${(await backend.windows()).split("\n").slice(0, a.limit ?? 12).join("\n")}`);
       busStop();
       B.url = String(a.url ?? process.env.NEXUS_BROWSER_DESKTOP_BUS_URL ?? "https://relay.spitfire-products.com").replace(/\/+$/, "");
       if (!/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(B.url)) throw new Error("bus url must be https (or http on localhost for tests)");
-      B.host = String(a.host ?? process.env.NEXUS_BROWSER_DESKTOP_BUS_HOST ?? os.hostname().split(".")[0]).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40) || "desktop";
+      B.host = String(a.host ?? process.env.NEXUS_BROWSER_DESKTOP_BUS_HOST ?? os2.hostname().split(".")[0]).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 40) || "desktop";
       B.keyFile = String(a.key_file ?? process.env.NEXUS_BROWSER_DESKTOP_BUS_KEY_FILE ?? "");
       B.titles = a.titles !== false;
       B.intervalMs = Math.max(5e3, Math.min(3e5, Number(a.interval_ms ?? 1e4)));
@@ -1906,7 +2018,7 @@ ${hotkeyCatalog(platformOf(a))}` }] };
           cursor_screenshot_px: c ? [Math.round(c.x / g.f), Math.round(c.y / g.f)] : null,
           permissions: pm,
           stop_file: stopFile,
-          stopped: fs.existsSync(stopFile),
+          stopped: fs2.existsSync(stopFile),
           launch_allow_list: apps
         }))] };
       }
@@ -2003,6 +2115,25 @@ ${hotkeyCatalog(platformOf(a))}`)] };
     }
     await guard();
     switch (a.action) {
+      // 0.11.0: macOS native automation — scripts and the user's own Shortcuts instead of driving the UI (guarded + audited like any action)
+      case "osa":
+      case "macshortcut": {
+        if (process.platform !== "darwin") throw new Error(`${a.action} is macOS-only`);
+        const exec = (cmd, args, o2) => new Promise((res) => {
+          const c = execFile(cmd, args, { timeout: o2?.timeoutMs ?? 6e4, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" }, (err, stdout, stderr) => res({ code: err ? typeof err.code === "number" ? err.code : 1 : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") }));
+          if (o2?.input !== void 0) {
+            c.stdin?.end(o2.input);
+          }
+        });
+        if (a.action === "osa") {
+          if (typeof a.source !== "string" || !a.source.trim()) throw new Error('osa needs source (AppleScript, or JXA with lang:"jxa")');
+          const r2 = await runOsa(exec, a.source, a.lang === "jxa" ? "jxa" : "applescript", { validate: a.validate === true });
+          return { content: [text(JSON.stringify(r2, null, 1))], ...r2.ok ? {} : { isError: true } };
+        }
+        const op = a.op === "run" ? "run" : "list";
+        const r = await runShortcuts(exec, op, a.name, typeof a.input === "string" ? a.input : void 0, { outputType: a.output_type });
+        return { content: [text(JSON.stringify(r, null, 1))], ...r.ok ? {} : { isError: true } };
+      }
       case "mouse_move": {
         const p = toScreen(a.coordinate, g);
         await backend.move(p);
@@ -2198,6 +2329,7 @@ ${log.join("\n")}`), ...imgParts()];
   };
 }
 var DESCRIPTION = `KEYBOARD FIRST (standing rule): on any program you have not driven before, FIRST build its keyboard/shortcut schema \u2014 menu {list:true} (every menu item with its shortcut, macOS), hotkey {list:true}, on Windows the Alt-letter menus and underlined accelerators (Alt, then the letters; F10; Shift+F10 context menu), and the app's own shortcut list (Help / Keyboard Shortcuts / its docs) \u2014 then drive it by keys, run scripts and macros. Mouse clicks are the LAST resort (no key path exists) or for gates that need human-like movement.
+NATIVE AUTOMATION FIRST on macOS (0.11): before driving the UI, check whether a script reaches it \u2014 osa {source, lang?:"applescript"|"jxa", validate?:true} compiles (validate) or runs an AppleScript/JXA (errors come back with line or character position, error number and a permission hint), and macshortcut {op:"list"} / {op:"run", name, input?, output_type?} runs the user's EXISTING Shortcuts (System Settings toggles and Maps/Freeform/Screenshot are reachable only through Shortcuts/App Intents). Validate a script before running it.
 See and drive the WHOLE screen with mouse and keyboard (not just a browser page). Use when a task needs other apps (Disk Utility, Terminal, Finder, installers, system dialogs). Take a screenshot first; coordinates are pixels IN THAT SCREENSHOT at the size "info" reports (info.screenshot) \u2014 if your viewer shows the image downscaled, scale your coordinates back up first (0.2.3 field trap: a 640-wide render of a 1280-wide shot put a click in the wrong menu).
 FASTEST PATH (keyboard first) \u2014 always try in this order, clicks LAST: (1) a native shortcut: hotkey {name} (hotkey {list:true} = the catalog: spotlight, go_to_folder (works in every Open/Save dialog: type a path + Return), help_search (runs ANY menu item by typing its name + Return), save_as, app_switcher, menu_bar \u2026; platform:"win" for a Windows VM) or key {text}; (2) a menu item BY NAME: menu {path:"File > Export > History", app?} (menu {list:true, top?} shows every item WITH its existing shortcut \u2014 macOS); (3) for a menu item you will use repeatedly that has no shortcut: shortcut {op:"set", app, menu_item, keys:"cmd+opt+e"} creates a real macOS App Shortcut (the app must be quit + reopened; op:"remove" undoes it); (4) a whole multi-step task in ONE call: run {script} \u2014 one command per line: hotkey NAME \xB7 key COMBO\u2026 \xB7 type TEXT \xB7 paste TEXT \xB7 fill X,Y [commit=tab|enter|none] [delay=MS] [escape] [paste] -- TEXT \xB7 click|dclick|tclick|rclick X,Y \xB7 move X,Y \xB7 drag X1,Y1 X2,Y2 \xB7 scroll X,Y DIR [N] \xB7 menu A > B [@App] \xB7 shortcut App | Item | keys \xB7 launch APP \xB7 focus WINDOW \xB7 wait SECONDS (1\u20132, never milliseconds) \xB7 wait_window REGEX [S] \xB7 zoom X1,Y1,X2,Y2 \xB7 screenshot \xB7 set NAME VALUE \xB7 macro NAME [k=v\u2026] \xB7 # comment; \${name} = a variable; stops at the first failing line and says which; save a working sequence with macro {op:"save", name, script, description} and replay it with run {macro, vars} \u2014 macros are your own created shortcuts (macro {op:"list"}) \u2014 CHECK a new or long script FIRST with run {script, validate:true} (or macro {op:"validate", name}): nothing runs, every line is checked (vars, hotkey names, key combos, live menu paths, nested macros, allow-list, coordinates) and errors come back with line numbers + suggestions; (5) only then single clicks.
 CONTEXT + EVENTS (0.6): context = one compact header (front app + window + focused element, every window, the Windows guest's front window and focus when its helper runs, scan freshness, watch state, recent events, safety) \u2014 call it FIRST and whenever you are unsure what is on screen; it is far cheaper than a screenshot. watch {op:"start", paths?, interval_ms?, guest?} then streams events (app_activated, window_opened [dialog], window_closed, window_focused, window_retitled, focus_changed, value_changed as a character COUNT only, app_launched/quit, file_created/changed/removed in watched folders, guest:\u2026 for the VM) and EVERY later desktop result ends with the events you have not seen, split into "during this action" (its effects: the dialog that opened, the window that closed) and "since your last call" (things that happened on their own: a download landing, an alert). React to events instead of re-screenshotting; watch {op:"events"} lists them, watch {op:"status"} shows poll cost. Acting on a ref whose window has since closed or been retitled returns a WARNING \u2014 rescan. Events are also appended to desktop-events.jsonl in the home folder.
@@ -2252,8 +2384,14 @@ function registerDesktopTool(server, home) {
       "context",
       "watch",
       "app",
-      "bus"
+      "bus",
+      "osa",
+      "macshortcut"
     ]),
+    source: z.string().optional().describe("osa: the AppleScript (default) or JXA source"),
+    lang: z.enum(["applescript", "jxa"]).optional().describe("osa: script language (default applescript)"),
+    input: z.string().optional().describe("macshortcut run: text passed to the shortcut as its input"),
+    output_type: z.string().optional().describe("macshortcut run: output UTI, e.g. public.plain-text"),
     ref: z.string().optional().describe('scan ref like "e12" \u2014 for grab / press / set_value / clicks'),
     filter: z.object({ role: z.string().optional(), hasText: z.string().optional(), interactive: z.boolean().optional() }).optional().describe('scan: role (e.g. "Button", "TextField"), hasText (title/description/value contains), interactive'),
     max: z.number().int().min(10).max(2e3).optional().describe("scan: max elements walked (default 250)"),
@@ -2320,6 +2458,11 @@ function registerDesktopTool(server, home) {
 }
 
 export {
+  osaHint,
+  parseOsaError,
+  stripShortcutsNoise,
+  runOsa,
+  runShortcuts,
   mergeLight,
   isDialogWin,
   diffState,
@@ -2341,4 +2484,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-LUBPQU6H.js.map
+//# sourceMappingURL=chunk-ZIIANQVA.js.map
