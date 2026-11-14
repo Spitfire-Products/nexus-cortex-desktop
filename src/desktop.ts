@@ -19,7 +19,7 @@ type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.11.5';
+const VERSION = '0.11.6';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 
@@ -1253,7 +1253,7 @@ export function createDesktop(o: DesktopOptions) {
     switch (a.action) {
       case 'info': {
         const c = await backend.cursor().catch(() => null); const fc = o.mode === 'real' ? await failsafeCorner() : null; const pm = await perms();
-        return { content: [text(JSON.stringify({ mode: o.mode, failsafe_corner: fc, failsafe_corner_px: fc ? (({ x, y }) => [Math.round(x / g.f), Math.round(y / g.f)])(cornerPt(fc, g)) : null, backend: backend.name, screen_points: [g.w, g.h], screenshot: [g.sw, g.sh], scale: +g.f.toFixed(4),
+        return { content: [text(JSON.stringify({ version: VERSION, mode: o.mode, failsafe_corner: fc, failsafe_corner_px: fc ? (({ x, y }) => [Math.round(x / g.f), Math.round(y / g.f)])(cornerPt(fc, g)) : null, backend: backend.name, screen_points: [g.w, g.h], screenshot: [g.sw, g.sh], scale: +g.f.toFixed(4),
           cursor_screenshot_px: c ? [Math.round(c.x / g.f), Math.round(c.y / g.f)] : null, permissions: pm, stop_file: stopFile, stopped: fs.existsSync(stopFile), launch_allow_list: apps }))] };
       }
       case 'screenshot': { const s = await shot(); const pm = await perms();

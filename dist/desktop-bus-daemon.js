@@ -1,7 +1,7 @@
 import {
   createDesktop,
   desktopMode
-} from "./chunk-WVMOQLEM.js";
+} from "./chunk-JC4PD4HN.js";
 import "./chunk-ZQPMRQT4.js";
 
 // src/desktop-bus-daemon.ts

@@ -70,6 +70,7 @@ const fake = { name: 'fake', size: async () => ({ w: 2560, h: 1600 }), capture: 
   cursor: async () => cur, launch: async a => calls.push(['launch', a]), windows: async () => 'w', focus: async w => calls.push(['focus', w]) };
 let d = createDesktop({ mode: 'real', home, backend: fake, maxWidth: 1280 });
 let r = await d.handle({ action: 'info' }); const info = JSON.parse(r.content[0].text);
+ok(info.version === JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, `info reports the RUNNING version (${info.version}) — 11-14: an agent installed 0.11.5 but its server still ran 0.11.4`);
 ok(info.screenshot[0] === 1280 && info.screenshot[1] === 800 && info.scale === 2, `scale 2560×1600 → 1280×800, f=2 (${r.content[0].text.slice(0, 80)})`);
 r = await d.handle({ action: 'left_click', coordinate: [100, 50], screenshot: false });
 ok(JSON.stringify(calls.at(-1)) === JSON.stringify(['click', { x: 200, y: 100 }, 'left', 1]), 'click maps screenshot px → screen points ×2');

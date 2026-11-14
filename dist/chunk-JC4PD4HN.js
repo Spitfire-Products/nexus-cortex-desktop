@@ -135,7 +135,7 @@ async function runShortcuts(exec, op, name, input, opts = {}) {
 }
 
 // src/desktop.ts
-var VERSION = "0.11.5";
+var VERSION = "0.11.6";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -2033,6 +2033,7 @@ ${hotkeyCatalog(platformOf(a))}` }] };
         const fc = o.mode === "real" ? await failsafeCorner() : null;
         const pm = await perms();
         return { content: [text(JSON.stringify({
+          version: VERSION,
           mode: o.mode,
           failsafe_corner: fc,
           failsafe_corner_px: fc ? (({ x, y }) => [Math.round(x / g.f), Math.round(y / g.f)])(cornerPt(fc, g)) : null,
@@ -2507,4 +2508,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-WVMOQLEM.js.map
+//# sourceMappingURL=chunk-JC4PD4HN.js.map
