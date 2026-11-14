@@ -93,6 +93,15 @@ and the tool maps clicks back to the screen, including on Retina displays.
 
 ## Using it outside nexus-cortex
 
+The package ships a stdio MCP server, `nexus-desktop`. It refuses to start unless desktop control is enabled (`cortex desktop enable`,
+or `NEXUS_DESKTOP=real|virtual` in its environment):
+
+```bash
+claude mcp add nexus-desktop -e NEXUS_DESKTOP=real -- nexus-desktop     # Claude Code
+```
+
+In code:
+
 ```js
 // NEXUS_DESKTOP=real (or virtual) must be set in the environment; the tool refuses to act while it is off.
 import { createDesktopMCP } from '@nexus-cortex/desktop';

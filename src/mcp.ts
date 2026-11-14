@@ -15,7 +15,7 @@ export interface DesktopMCPOptions {
 
 export async function createDesktopMCP(opts: DesktopMCPOptions = {}) {
   const home = opts.home ?? process.env.NEXUS_BROWSER_HOME ?? path.join(os.homedir(), '.nexus-cortex', 'browser');
-  const server = new McpServer({ name: 'nexus-desktop', version: '0.10.4' });
+  const server = new McpServer({ name: 'nexus-desktop', version: '0.10.5' });
   const desktop = registerDesktopTool(server, home);
   if (!desktop) throw new Error('nexus-desktop: NEXUS_DESKTOP is not set to virtual|real — run `cortex desktop enable`');
   return { server, desktop, async close() { try { await (desktop as any).close?.(); } catch { /* best effort */ } } };
