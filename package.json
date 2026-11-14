@@ -1,6 +1,6 @@
 {
   "name": "@nexus-cortex/desktop",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "description": "Host-computer control for AI agents: screen, mouse, keyboard, native-app accessibility perception (macOS AX, Windows-guest UI Automation), app profiles and an event feed \u2014 as one MCP tool, `desktop`. Off unless NEXUS_BROWSER_DESKTOP=virtual|real.",
   "type": "module",
   "main": "./dist/index.js",

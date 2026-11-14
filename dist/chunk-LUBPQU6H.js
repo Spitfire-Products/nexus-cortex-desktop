@@ -18,7 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-var VERSION = "0.10.5";
+var VERSION = "0.10.6";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -366,7 +366,7 @@ var JXA = `ObjC.import('CoreGraphics'); ObjC.import('AppKit');
 function post(t, x, y, b, n) { var e = $.CGEventCreateMouseEvent(null, t, $.CGPointMake(x, y), b); if (n) $.CGEventSetIntegerValueField(e, 1, n); $.CGEventPost(0, e); }
 function run(argv) {
   var op = argv[0], a = argv.slice(1).map(Number);
-  if (op === 'perms') { ObjC.import('ApplicationServices'); var ax = $.AXIsProcessTrusted(); var sr = typeof $.CGPreflightScreenCaptureAccess === 'function' ? $.CGPreflightScreenCaptureAccess() : true; return (ax ? 1 : 0) + ' ' + (sr ? 1 : 0); }
+  if (op === 'perms') { ObjC.import('ApplicationServices'); var ax = $.AXIsProcessTrusted(); var sr = 2; try { ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); sr = $.CGPreflightScreenCaptureAccess() ? 1 : 0; } catch (e) { sr = 2; } return (ax ? 1 : 0) + ' ' + sr; }
   if (op === 'size') { var f = $.NSScreen.mainScreen.frame; return f.size.width + ' ' + f.size.height; }
   if (op === 'cursor') { var p = $.CGEventGetLocation($.CGEventCreate(null)); return Math.round(p.x) + ' ' + Math.round(p.y); }
   if (op === 'move') { post(5, a[0], a[1], 0, 0); return 'ok'; }
@@ -524,7 +524,7 @@ function macBackend(apps, useCliclick = onPath("cliclick")) {
     async permissions() {
       try {
         const [ax, sr] = (await jxa("perms")).split(/\s+/).map(Number);
-        return { accessibility: ax === 1, screen_recording: sr === 1 };
+        return { accessibility: ax === 1, ...sr === 2 ? {} : { screen_recording: sr === 1 } };
       } catch {
         return {};
       }
@@ -2341,4 +2341,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-2L3HL6K2.js.map
+//# sourceMappingURL=chunk-LUBPQU6H.js.map

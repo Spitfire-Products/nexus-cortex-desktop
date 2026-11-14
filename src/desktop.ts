@@ -18,7 +18,7 @@ type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.10.5';
+const VERSION = '0.10.6';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 
@@ -272,7 +272,7 @@ const JXA = `ObjC.import('CoreGraphics'); ObjC.import('AppKit');
 function post(t, x, y, b, n) { var e = $.CGEventCreateMouseEvent(null, t, $.CGPointMake(x, y), b); if (n) $.CGEventSetIntegerValueField(e, 1, n); $.CGEventPost(0, e); }
 function run(argv) {
   var op = argv[0], a = argv.slice(1).map(Number);
-  if (op === 'perms') { ObjC.import('ApplicationServices'); var ax = $.AXIsProcessTrusted(); var sr = typeof $.CGPreflightScreenCaptureAccess === 'function' ? $.CGPreflightScreenCaptureAccess() : true; return (ax ? 1 : 0) + ' ' + (sr ? 1 : 0); }
+  if (op === 'perms') { ObjC.import('ApplicationServices'); var ax = $.AXIsProcessTrusted(); var sr = 2; try { ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); sr = $.CGPreflightScreenCaptureAccess() ? 1 : 0; } catch (e) { sr = 2; } return (ax ? 1 : 0) + ' ' + sr; }
   if (op === 'size') { var f = $.NSScreen.mainScreen.frame; return f.size.width + ' ' + f.size.height; }
   if (op === 'cursor') { var p = $.CGEventGetLocation($.CGEventCreate(null)); return Math.round(p.x) + ' ' + Math.round(p.y); }
   if (op === 'move') { post(5, a[0], a[1], 0, 0); return 'ok'; }
@@ -420,7 +420,7 @@ export function macBackend(apps: string[], useCliclick = onPath('cliclick')): De
     async frontApp() { return String(await osa('tell application "System Events" to name of first process whose frontmost is true')).trim(); },
     async state(o) { return JSON.parse(String(await run('osascript', ['-l', 'JavaScript', '-e', JXA_STATE, o?.full === false ? 'light' : 'full'], undefined, undefined, o?.timeoutMs ?? 10_000)).trim()) as DeskState; },
     async permissions() {
-      try { const [ax, sr] = (await jxa('perms')).split(/\s+/).map(Number); return { accessibility: ax === 1, screen_recording: sr === 1 }; } catch { return {}; }
+      try { const [ax, sr] = (await jxa('perms')).split(/\s+/).map(Number); return { accessibility: ax === 1, ...(sr === 2 ? {} : { screen_recording: sr === 1 }) }; } catch { return {}; }
     },
     async hotCorners() {
       const out: Corner[] = [];
