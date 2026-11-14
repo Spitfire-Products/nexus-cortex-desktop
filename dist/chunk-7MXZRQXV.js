@@ -135,7 +135,7 @@ async function runShortcuts(exec, op, name, input, opts = {}) {
 }
 
 // src/desktop.ts
-var VERSION = "0.11.1";
+var VERSION = "0.11.4";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -2487,4 +2487,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-LAL2EA5A.js.map
+//# sourceMappingURL=chunk-7MXZRQXV.js.map
