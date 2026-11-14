@@ -130,7 +130,7 @@ async function runShortcuts(exec, op, name, input, opts = {}) {
 }
 
 // src/desktop.ts
-var VERSION = "0.11.0";
+var VERSION = "0.11.1";
 function mergeLight(prev, light) {
   if (!light.partial || !prev) return light;
   const others = prev.windows.filter((w) => w.app !== light.app);
@@ -2121,9 +2121,7 @@ ${hotkeyCatalog(platformOf(a))}`)] };
         if (process.platform !== "darwin") throw new Error(`${a.action} is macOS-only`);
         const exec = (cmd, args, o2) => new Promise((res) => {
           const c = execFile(cmd, args, { timeout: o2?.timeoutMs ?? 6e4, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" }, (err, stdout, stderr) => res({ code: err ? typeof err.code === "number" ? err.code : 1 : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") }));
-          if (o2?.input !== void 0) {
-            c.stdin?.end(o2.input);
-          }
+          c.stdin?.end(o2?.input ?? "");
         });
         if (a.action === "osa") {
           if (typeof a.source !== "string" || !a.source.trim()) throw new Error('osa needs source (AppleScript, or JXA with lang:"jxa")');
@@ -2484,4 +2482,4 @@ export {
   createDesktop,
   registerDesktopTool
 };
-//# sourceMappingURL=chunk-ZIIANQVA.js.map
+//# sourceMappingURL=chunk-G2TELC6V.js.map

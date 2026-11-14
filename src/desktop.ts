@@ -19,7 +19,7 @@ type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.11.0';
+const VERSION = '0.11.1';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 
@@ -1303,7 +1303,8 @@ export function createDesktop(o: DesktopOptions) {
         const exec: Exec = (cmd, args, o) => new Promise((res) => {
           const c = execFile(cmd, args, { timeout: o?.timeoutMs ?? 60000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }, (err: any, stdout, stderr) =>
             res({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
-          if (o?.input !== undefined) { c.stdin?.end(o.input); }
+          // 0.11.1 (m2): ALWAYS close stdin — `shortcuts run` reads a non-TTY stdin as its input and waits for EOF (blocked > 5 min under an agent shell)
+          c.stdin?.end(o?.input ?? '');
         });
         if (a.action === 'osa') {
           if (typeof a.source !== 'string' || !a.source.trim()) throw new Error('osa needs source (AppleScript, or JXA with lang:"jxa")');
