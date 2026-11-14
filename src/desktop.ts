@@ -18,7 +18,7 @@ type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.10.3';
+const VERSION = '0.10.4';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 

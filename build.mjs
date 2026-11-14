@@ -3,7 +3,7 @@
 // Bundle @nexus-cortex/desktop. zod stays EXTERNAL (peer): the MCP server that registers the tool must share one zod instance with it.
 import * as esbuild from 'esbuild';
 await esbuild.build({
-  entryPoints: { index: 'src/index.ts', desktop: 'src/desktop.ts', 'desktop-script': 'src/desktop-script.ts', 'desktop-bus-daemon': 'src/desktop-bus-daemon.ts' },
+  entryPoints: { index: 'src/index.ts', server: 'src/server.ts', desktop: 'src/desktop.ts', 'desktop-script': 'src/desktop-script.ts', 'desktop-bus-daemon': 'src/desktop-bus-daemon.ts' },
   outdir: 'dist', bundle: true, platform: 'node', format: 'esm', target: 'node20', splitting: true, sourcemap: true,
   external: ['zod', '@modelcontextprotocol/sdk', 'node:*'], logLevel: 'warning',
 });
