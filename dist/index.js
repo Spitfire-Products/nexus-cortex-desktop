@@ -1,6 +1,6 @@
 import {
   createDesktopMCP
-} from "./chunk-4RADQ76Z.js";
+} from "./chunk-MRLV542F.js";
 import {
   AX_INTERACTIVE,
   GUEST_INTERACTIVE_CLASS,
@@ -27,7 +27,7 @@ import {
   stripShortcutsNoise,
   x11Backend,
   xdoKey
-} from "./chunk-7MXZRQXV.js";
+} from "./chunk-WVMOQLEM.js";
 import "./chunk-ZQPMRQT4.js";
 export {
   AX_INTERACTIVE,

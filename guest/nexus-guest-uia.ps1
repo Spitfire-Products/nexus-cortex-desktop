@@ -12,7 +12,7 @@ param(
   [int]$PollMs = 150,
   [int]$MaxNodes = 600
 )
-$VERSION = '0.11.4'
+$VERSION = '0.11.5'
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes

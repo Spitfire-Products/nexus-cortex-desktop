@@ -19,7 +19,7 @@ type Mode = 'virtual' | 'real';
 /** 0.2.6 (field: typing into a Parallels Windows guest dropped/mangled characters): `paste` = clipboard + paste key (clipboard restored);
  *  `charDelayMs` = one character at a time with a pause. */
 export type TypeOpts = { via?: 'keys' | 'paste'; charDelayMs?: number; pasteKey?: string };
-const VERSION = '0.11.4';
+const VERSION = '0.11.5';
 type Pt = { x: number; y: number };
 type Shot = { png: Buffer; width: number; height: number };
 
@@ -302,11 +302,18 @@ function run(argv) { var se = Application('System Events'); var p = argv[0] ? se
       if (!recent && /^(open recent|recent items|recent documents|recent files)$/i.test(n)) { out.push(bn + ' > ' + n + ' > …\t(recent items hidden; include_recent:true to list)'); continue; }
       try { var subs = it.menus[0].menuItems(); for (var q = 0; q < subs.length; q++) { var n2; try { n2 = subs[q].name(); } catch (e) { continue; } if (!n2) continue; var k2 = sc(subs[q]); out.push(bn + ' > ' + n + ' > ' + n2 + (k2 ? '\\t' + k2 : '')); } } catch (e) {} } }
   return p.name() + '\\n' + out.join('\\n'); }`;
-const JXA_AX = `function pick(se, o) { var p = o.app ? se.processes.byName(o.app) : se.processes.whose({ frontmost: true })[0];
-  var wins = p.windows(), w = null;
-  if (o.window) { for (var i = 0; i < wins.length; i++) { try { if (String(wins[i].name()).toLowerCase().indexOf(String(o.window).toLowerCase()) >= 0) { w = wins[i]; break; } } catch (e) {} } }
+const JXA_AX = `function nm(x) { try { var v = x.name(); return v === null || v === undefined ? '' : String(v); } catch (e) { return ''; } }
+function pick(se, o) { var p = o.app ? se.processes.byName(o.app) : se.processes.whose({ frontmost: true })[0];
+  // 0.11.5 (m2 macOS 15.3.1, TextEdit not frontmost): p.windows() threw "Can't convert types (-1700)" — every scan/grab of that app failed.
+  // Fall back to the AXWindows attribute, then to the process's AXWindow-role children; each step failing is named in the error.
+  var wins = null, how = [], w = null;
+  try { wins = p.windows(); } catch (e) { how.push('windows(): ' + e.message); }
+  if (!wins) { try { wins = p.attributes.byName('AXWindows').value(); if (!wins || !wins.length) wins = null; } catch (e) { how.push('AXWindows: ' + e.message); } }
+  if (!wins) { try { wins = p.uiElements.whose({ role: 'AXWindow' })(); } catch (e) { how.push('AXWindow children: ' + e.message); } }
+  if (!wins) throw new Error('cannot list the windows of ' + (o.app || 'the front app') + ' (' + how.join('; ') + ')');
+  if (o.window) { for (var i = 0; i < wins.length; i++) { if (nm(wins[i]).toLowerCase().indexOf(String(o.window).toLowerCase()) >= 0) { w = wins[i]; break; } } }
   else if (wins.length) w = wins[0];
-  if (!w) throw new Error('no window' + (o.window ? ' matching "' + o.window + '"' : '') + ' in ' + p.name());
+  if (!w) throw new Error('no window' + (o.window ? ' matching "' + o.window + '"' : '') + ' in ' + (o.app || nm(p)));
   return { p: p, w: w }; }
 function el(pr, path) { var props = {}; try { props = pr.properties(); } catch (e) {} return fromProps(props, path); }
 function fromProps(props, path) { props = props || {};
@@ -347,8 +354,9 @@ function run(argv) { var o = JSON.parse(argv[0]), se = Application('System Event
         row.v = row.v.slice(0, 160); out.push(row);
         if (d < depth && CONT[row.r]) walk(node.uiElements[i], pth, d + 1); } };   // containers only, on BOTH paths
     walk(pw.w, [], 1);
-    return JSON.stringify({ app: pw.p.name(), window: String(pw.w.name() || ''), els: out, truncated: trunc, timed_out: timedOut, ms: Date.now() - t0, events: events, batched: batched, abatched: abatched, batch: batchOK, diag: diag }); }
-  var target = resolve(pw.w, o.path), note = '';
+    return JSON.stringify({ app: nm(pw.p) || String(o.app || ''), window: nm(pw.w), els: out, truncated: trunc, timed_out: timedOut, ms: Date.now() - t0, events: events, batched: batched, abatched: abatched, batch: batchOK, diag: diag }); }
+  var target, note = '';
+  try { target = resolve(pw.w, o.path); target.role(); } catch (e) { throw new Error('the element at ref path [' + o.path + '] is gone or unreadable (' + e.message + ') — scan again'); }
   if (o.op === 'press') { try { target.actions.byName('AXPress').perform(); note = 'AXPress'; } catch (e) { note = 'no AXPress: ' + e; } }
   if (o.op === 'set') { target.value = o.value; delay(0.1); note = 'value set'; }
   var r = el(target, o.path); var kids = 0; try { kids = target.uiElements().length; } catch (e) {} r.n = kids; r.ok = note.indexOf('no AXPress') !== 0; r.note = note;
@@ -727,7 +735,12 @@ export function createDesktop(o: DesktopOptions) {
     if (!el) throw new Error(`unknown ref "${ref}" (last scan has e1–e${lastScan!.els.length})`);
     return el;
   };
-  const centerPx = (el: AxEl, g: { f: number }) => [Math.round((el.x + el.w / 2) / g.f), Math.round((el.y + el.h / 2) / g.f)];
+  // 0.11.5 (m2: a 62k-char iTerm2 text area reported center [785,-7156]): the center of the part ON SCREEN, so a click target is always visible
+  const centerPx = (el: AxEl, g: { f: number; w?: number; h?: number }) => {   // g.w/g.h = screen POINTS (AX units); sw/sh = screenshot px
+    let x0 = el.x, y0 = el.y, x1 = el.x + el.w, y1 = el.y + el.h;
+    if (g.w && g.h) { const cx0 = Math.max(x0, 0), cy0 = Math.max(y0, 0), cx1 = Math.min(x1, g.w), cy1 = Math.min(y1, g.h); if (cx1 > cx0 && cy1 > cy0) { x0 = cx0; y0 = cy0; x1 = cx1; y1 = cy1; } }
+    return [Math.round((x0 + x1) / 2 / g.f), Math.round((y0 + y1) / 2 / g.f)];
+  };
   const elLine = (el: AxEl, i: number, g: { f: number }) => {
     const [cx, cy] = centerPx(el, g); const label = el.t || el.d;
     return `e${i + 1}\t${el.r.replace(/^AX/, '')}${el.sr ? `/${el.sr.replace(/^AX/, '')}` : ''}\t${label ? JSON.stringify(label.slice(0, 80)) : '-'}\t@[${cx},${cy}] ${Math.round(el.w / g.f)}×${Math.round(el.h / g.f)}${el.v && el.v !== label ? `\tvalue=${JSON.stringify(el.v.slice(0, 60))}` : ''}${el.e ? '' : '\t(disabled)'}${el.f ? '\t(focused)' : ''}`;
